@@ -1,16 +1,18 @@
 # API Blog
 
-API backend para um projeto de blog, construida com Node.js, TypeScript, Express e Prisma.
+Backend de blog construido com Node.js, TypeScript, Express e Prisma, com autenticacao via JWT, recuperacao de senha por email e gerenciamento de posts com upload de midia.
 
-Atualmente o projeto ja oferece:
+## Funcionalidades
 
 - cadastro de usuario com upload opcional de foto de perfil
 - listagem de usuarios
 - login com JWT
-- fluxo de recuperacao de senha por email
+- recuperacao de senha por email
 - redefinicao de senha por token
+- criacao, listagem, atualizacao e remocao de posts
+- rotas administrativas de post protegidas por autenticacao e permissao de `admin`
+- upload de imagens e videos para o Cloudinary
 - validacao de entrada com Zod
-- integracao com PostgreSQL, Cloudinary e Gmail
 
 ## Stack
 
@@ -27,60 +29,44 @@ Atualmente o projeto ja oferece:
 - Nodemailer
 - TSX
 
-## Estrutura atual
+## Estrutura
 
 ```text
 api-blog/
 |-- prisma/
+|   |-- migrations/
 |   `-- schema.prisma
 |-- src/
 |   |-- config/
-|   |   |-- cloudinary.ts
-|   |   |-- mail.ts
-|   |   |-- multer.ts
-|   |   `-- sendMail.ts
 |   |-- controllers/
+|   |   |-- post/
 |   |   `-- user/
-|   |       |-- forgotPasswordController.ts
-|   |       |-- listUsersController.ts
-|   |       |-- loginUserController.ts
-|   |       |-- registerUserController.ts
-|   |       `-- resetPasswordController.ts
 |   |-- database/
-|   |   `-- db.ts
 |   |-- generated/
-|   |   `-- prisma/
 |   |-- middlewares/
-|   |   `-- validateSchema.ts
 |   |-- routes/
-|   |   `-- routes.ts
 |   |-- services/
+|   |   |-- post/
 |   |   `-- user/
-|   |       |-- forgotPasswordService.ts
-|   |       |-- listUsersService.ts
-|   |       |-- loginUserService.ts
-|   |       |-- registerUserService.ts
-|   |       `-- resetPasswordService.ts
 |   |-- shema/
-|   |   `-- userShema.ts
 |   `-- server.ts
+|-- upload/
 |-- uploads/
 |-- package.json
-|-- tsconfig.json
 `-- README.md
 ```
 
 ## Requisitos
 
-- Node.js
+- Node.js 18+
 - npm
-- banco PostgreSQL acessivel
+- PostgreSQL acessivel pela aplicacao
 - conta Cloudinary
-- conta Gmail ou credenciais compativeis com Nodemailer
+- conta Gmail com credenciais validas para o Nodemailer
 
 ## Variaveis de ambiente
 
-Crie um arquivo `.env` na raiz com valores semelhantes a estes:
+Crie um arquivo `.env` na raiz:
 
 ```env
 DATABASE_URL="postgresql://usuario:senha@host:porta/database"
@@ -97,9 +83,10 @@ EMAIL_PASS=sua_senha_de_app
 
 Observacoes:
 
-- a API usa `process.env.PORT || 3000`, entao a porta padrao atual e `3000`
-- a conexao com o banco e feita via `@prisma/adapter-pg` usando `DATABASE_URL`
-- o link enviado no fluxo de recuperacao hoje esta fixo em `http://localhost:3000/reset?token=...`
+- a aplicacao usa `process.env.PORT || 3000`
+- o Prisma usa `@prisma/adapter-pg` com `DATABASE_URL`
+- o envio de email esta configurado com `service: "gmail"`
+- o link de recuperacao enviado por email hoje aponta para `http://localhost:3000/reset?token=...`
 
 ## Instalacao
 
@@ -107,23 +94,17 @@ Observacoes:
 npm install
 ```
 
-## Como executar
-
-Para iniciar em desenvolvimento:
+## Executando o projeto
 
 ```bash
 npm run dev
 ```
 
-Servidor disponivel em:
-
-```text
-http://localhost:3000
-```
+API disponivel em `http://localhost:3000`.
 
 ## Scripts
 
-- `npm run dev`: inicia a API com `tsx watch src/server.ts`
+- `npm run dev`: inicia o servidor com `tsx watch src/server.ts`
 
 ## Banco de dados
 
@@ -138,43 +119,32 @@ O schema Prisma atual possui os models:
 
 Relacoes principais:
 
-- um usuario pode ter posts, comentarios, likes e tokens de recuperacao
+- um usuario possui posts, comentarios, likes e tokens de recuperacao
 - um post pertence a um usuario e pode ter midias, comentarios e likes
-- `PasswordReset` armazena hash do token, expiracao e uso
+- `Like` impede duplicidade por usuario e post com `@@unique([userId, postId])`
+- `PasswordReset` armazena apenas o hash do token, prazo de expiracao e uso
 
-## Arquitetura
-
-O projeto esta separado por responsabilidade:
-
-- `routes`: define os endpoints
-- `controllers`: recebe a requisicao HTTP
-- `services`: contem a regra de negocio
-- `middlewares`: validacoes e fluxo compartilhado
-- `config`: integracoes externas
-- `database`: instancia do Prisma Client
-
-## Endpoints
+## Rotas
 
 ### `POST /register`
 
-Cria um novo usuario. Aceita `multipart/form-data` quando houver imagem.
+Cria um novo usuario. Aceita `multipart/form-data`.
 
 Campos:
 
 - `name`
 - `email`
 - `password`
-- `role` -> `admin` ou `user`
-- `photo_profile` -> arquivo opcional
+- `role` (`admin` ou `user`, padrao `user`)
+- `photo_profile` (arquivo opcional)
 
-Comportamento atual:
+Comportamento:
 
 - valida os dados com Zod
 - faz hash da senha com Bcrypt
-- sobe a imagem para o Cloudinary, se enviada
+- envia a foto de perfil para o Cloudinary, se houver
 - remove o arquivo temporario local
-- salva o usuario no banco
-- bloqueia email duplicado
+- impede cadastro com email duplicado
 
 Exemplo:
 
@@ -187,7 +157,7 @@ curl -X POST http://localhost:3000/register \
   -F "photo_profile=@foto.png"
 ```
 
-Resposta esperada:
+Resposta de sucesso:
 
 ```json
 {
@@ -201,13 +171,16 @@ Resposta esperada:
 
 ### `GET /users`
 
-Lista os usuarios cadastrados.
+Lista os usuarios cadastrados em ordem decrescente de criacao.
 
-Comportamento atual:
+Retorna:
 
-- ordena por `createdAt` decrescente
-- nao retorna a senha
-- retorna `id`, `name`, `email`, `role`, `photo_profile` e `createdAt`
+- `id`
+- `name`
+- `email`
+- `role`
+- `photo_profile`
+- `createdAt`
 
 Exemplo:
 
@@ -219,54 +192,51 @@ curl http://localhost:3000/users
 
 Autentica um usuario com email e senha.
 
-Campos:
+Body JSON:
 
-- `email`
-- `password`
+```json
+{
+  "email": "janie@example.com",
+  "password": "123456"
+}
+```
 
-Comportamento atual:
+Comportamento:
 
 - busca o usuario por email
 - compara a senha com Bcrypt
 - gera JWT com `name` e `role`
-- usa `subject` com o `id` do usuario
-- define expiracao de `15d`
-- retorna uma string no formato `token:...`
+- define `subject` com o `id` do usuario
+- usa expiracao de `15d`
 
-Exemplo:
+Resposta atual:
 
-```bash
-curl -X POST http://localhost:3000/login \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"janie@example.com\",\"password\":\"123456\"}"
+```json
+"token:jwt-gerado"
 ```
 
 ### `POST /forgot-password`
 
 Inicia o fluxo de recuperacao de senha.
 
-Campos:
+Body JSON:
 
-- `email`
-
-Comportamento atual:
-
-- se o usuario existir, invalida tokens anteriores ainda abertos
-- cria um novo token aleatorio
-- salva apenas o hash do token no banco
-- envia email com link de redefinicao
-- define expiracao de 15 minutos
-- atualmente retorna tambem o `resetToken` na resposta
-
-Exemplo:
-
-```bash
-curl -X POST http://localhost:3000/forgot-password \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"janie@example.com\"}"
+```json
+{
+  "email": "janie@example.com"
+}
 ```
 
-Resposta atual:
+Comportamento:
+
+- retorna mensagem neutra se o email nao existir
+- invalida tokens anteriores ainda nao utilizados
+- gera um token aleatorio
+- salva apenas o hash do token no banco
+- envia email com link de recuperacao
+- define expiracao de 15 minutos
+
+Resposta atual quando o usuario existe:
 
 ```json
 {
@@ -275,7 +245,7 @@ Resposta atual:
 }
 ```
 
-Se o email nao existir, a resposta atual segue uma mensagem neutra:
+Resposta atual quando o usuario nao existe:
 
 ```json
 {
@@ -285,28 +255,23 @@ Se o email nao existir, a resposta atual segue uma mensagem neutra:
 
 ### `POST /reset-password/:token`
 
-Redefine a senha usando o token recebido.
+Redefine a senha a partir do token recebido.
 
-Campos:
+Body JSON:
 
-- `newPassword`
-- `token` pela URL
-
-Comportamento atual:
-
-- recebe o token puro na rota
-- gera o hash SHA-256 desse token
-- busca um registro valido e nao utilizado
-- atualiza a senha do usuario com hash Bcrypt
-- marca o token como usado
-
-Exemplo:
-
-```bash
-curl -X POST http://localhost:3000/reset-password/seu-token \
-  -H "Content-Type: application/json" \
-  -d "{\"newPassword\":\"novaSenha123\"}"
+```json
+{
+  "newPassword": "novaSenha123"
+}
 ```
+
+Comportamento:
+
+- recebe o token puro pela URL
+- gera hash SHA-256 do token
+- procura um token valido, nao utilizado e nao expirado
+- atualiza a senha com hash Bcrypt
+- marca o token como usado
 
 Resposta atual:
 
@@ -314,9 +279,149 @@ Resposta atual:
 "Senha redefinida com sucesso!"
 ```
 
+### `POST /createdpost`
+
+Cria um post com upload opcional de multiplos arquivos.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+- requisicao em `multipart/form-data`
+
+Campos:
+
+- `title`
+- `content`
+- `category` (opcional)
+- `files` (0 ou mais arquivos)
+
+Comportamento:
+
+- valida o token JWT
+- busca o usuario no banco
+- bloqueia usuarios que nao sejam `admin`
+- envia imagens e videos para o Cloudinary
+- remove arquivos temporarios locais mesmo em caso de falha
+- cria o post e as entradas de midia relacionadas no banco
+
+Exemplo:
+
+```bash
+curl -X POST http://localhost:3000/createdpost \
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -F "title=Meu primeiro post" \
+  -F "content=Conteudo do post" \
+  -F "category=tecnologia" \
+  -F "files=@imagem.png" \
+  -F "files=@video.mp4"
+```
+
+Resposta de sucesso:
+
+```json
+{
+  "id": "uuid",
+  "title": "Meu primeiro post",
+  "content": "Conteudo do post",
+  "category": "tecnologia",
+  "createdAt": "2026-03-26T12:00:00.000Z",
+  "userId": "uuid"
+}
+```
+
+### `GET /posts`
+
+Lista os posts cadastrados.
+
+Retorna atualmente:
+
+- `id`
+- `title`
+- `content`
+- `category`
+- `media`
+- `likes`
+- `comments`
+
+Exemplo:
+
+```bash
+curl http://localhost:3000/posts
+```
+
+### `PATCH /posts/:postId`
+
+Atualiza um post existente.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+- requisicao em `multipart/form-data` quando houver envio de arquivos
+
+Campos aceitos:
+
+- `title` (opcional)
+- `content` (opcional)
+- `category` (opcional)
+- `files` (0 ou mais arquivos opcionais)
+
+Comportamento:
+
+- localiza o post pelo `postId`
+- atualiza apenas os campos enviados
+- se novos arquivos forem enviados, remove as midias antigas do Cloudinary
+- apaga os registros antigos de midia no banco
+- faz upload das novas midias e as vincula ao post
+
+Exemplo:
+
+```bash
+curl -X PATCH http://localhost:3000/posts/POST_ID \
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -F "title=Titulo atualizado" \
+  -F "content=Conteudo atualizado" \
+  -F "files=@nova-imagem.png"
+```
+
+### `DELETE /posts/:postId`
+
+Remove um post existente.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+
+Validacao:
+
+- `postId` precisa ser um UUID valido
+
+Comportamento:
+
+- localiza o post com as midias relacionadas
+- remove os arquivos do Cloudinary
+- exclui `likes`, `comments`, `media` e o `post` no banco
+
+Exemplo:
+
+```bash
+curl -X DELETE http://localhost:3000/posts/POST_ID \
+  -H "Authorization: Bearer SEU_TOKEN"
+```
+
+Resposta de sucesso:
+
+```json
+{
+  "message": "Post deletado com sucesso"
+}
+```
+
 ## Validacao
 
-As rotas usam `validateSchema` com Zod.
+As rotas que usam schema passam pelo middleware `validateSchema` com Zod.
 
 Regras atuais:
 
@@ -324,7 +429,7 @@ Regras atuais:
 - `name`: minimo de 3 caracteres
 - `email`: email valido
 - `password`: minimo de 6 caracteres
-- `role`: apenas `admin` ou `user`
+- `role`: `admin` ou `user`
 - `login`
 - `email`: email valido
 - `password`: minimo de 6 caracteres
@@ -332,27 +437,40 @@ Regras atuais:
 - `email`: email valido
 - `reset-password`
 - `newPassword`: minimo de 6 caracteres
-- `token` nos params: obrigatorio
+- `token` nos parametros: obrigatorio
+- `delete post`
+- `postId` nos parametros: UUID obrigatorio
 
-Em caso de erro de validacao, a API responde com status `400` e um array em `details`.
+Em caso de erro de validacao, a API responde com status `400` no formato:
 
-## Upload de imagem
+```json
+{
+  "error": "Erro de validacao",
+  "details": [
+    {
+      "campo": "body.email",
+      "mensagem": "Email invalido"
+    }
+  ]
+}
+```
+
+## Uploads
 
 Configuracao atual do Multer:
 
-- salva arquivos em `uploads/`
-- limite de 5 MB
-- aceita `image/jpeg`, `image/png` e `image/webp`
+- usa a pasta temporaria `upload/`
+- aceita ate `100MB` por arquivo
+- aceita `image/jpeg`, `image/png`, `image/webp`, `video/mp4`, `video/webm` e `video/quicktime`
 
-Campo esperado na rota:
+Campos esperados:
 
-```text
-photo_profile
-```
+- `photo_profile` para foto de perfil
+- `files` para midias do post
 
 ## Comandos uteis do Prisma
 
-O `package.json` ainda nao possui scripts dedicados para o Prisma, mas estes comandos sao uteis no desenvolvimento:
+O `package.json` ainda nao possui scripts dedicados para o Prisma, mas estes comandos sao uteis:
 
 ```bash
 npx prisma generate
@@ -361,20 +479,26 @@ npx prisma migrate dev
 
 ## Estado atual do projeto
 
-A base de usuarios esta funcional, mas ainda nao ha:
+Ja existe:
 
-- middleware de autenticacao para proteger rotas
-- middleware de autorizacao por papel
-- CRUD de posts
+- autenticacao com JWT
+- recuperacao e redefinicao de senha
+- middleware de autorizacao para rotas administrativas de posts
+- criacao, listagem, atualizacao e exclusao de posts
+- upload de midia para posts
+
+Ainda nao existe:
+
 - CRUD de comentarios
 - CRUD de likes
-- tratamento centralizado de erros
+- middleware global de tratamento de erros
 - testes automatizados
 - documentacao OpenAPI ou Swagger
+- validacao Zod para criacao e atualizacao de post
 
 ## Observacoes importantes
 
 - o projeto usa `"type": "module"` no `package.json`
 - o Prisma Client e gerado em `src/generated/prisma`
-- o diretorio `uploads/` funciona como armazenamento temporario
-- o diretorio de schemas esta nomeado como `shema`, sem o `c`
+- ha duas pastas relacionadas a upload no repositorio: `upload/` e a usada pelo Multer atualmente
+- o diretorio de schemas esta nomeado como `shema`

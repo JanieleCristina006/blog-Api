@@ -1,94 +1,80 @@
 import { prisma } from "../../database/db.js";
 import cloudinary from "../../config/cloudinary.js";
 import fs from "node:fs/promises";
-import { upload } from "../../config/multer.js";
-
 
 interface CreatedPostServiceProps {
-  title: string,
-  content: string,
-  category?: string,
-  files?: Express.Multer.File[],
-  userId: string
+  title: string;
+  content: string;
+  category?: string;
+  files?: Express.Multer.File[];
+  userId: string;
 }
 
 type MulterFile = Express.Multer.File;
 
 export class CreatedPostService {
-
   /**
-   * Faz upload de múltiplos arquivos para o Cloudinary
-   * e remove os arquivos locais após o envio
+   * Faz upload dos arquivos para o Cloudinary
+   * e remove os arquivos locais após o upload
    */
   async uploadFile(files: MulterFile[], folder = "uploads") {
+    const results = [];
 
-    // Array que vai armazenar os resultados do upload
-    const results = []
-
-    // Percorre cada arquivo enviado
     for (const file of files) {
       try {
-        // Define o tipo do recurso baseado no mimetype
-        // (Cloudinary precisa saber se é image ou video)
         const resourceType = file.mimetype.startsWith("video/")
           ? "video"
           : "image";
 
-        // Faz upload do arquivo salvo localmente (file.path)
         const result = await cloudinary.uploader.upload(file.path, {
-          folder, // pasta dentro do Cloudinary
+          folder,
           resource_type: resourceType,
         });
 
-        // Armazena os dados importantes do upload
         results.push({
-          url: result.secure_url,       // URL pública do arquivo
-          publicId: result.public_id,  // ID no Cloudinary
-          type: result.resource_type,  // image ou video
+          url: result.secure_url,
+          public_id: result.public_id, // 👈 importante pro delete depois
+          type: result.resource_type,
         });
-
       } finally {
-
-        // 🔥 Remove o arquivo local SEMPRE (mesmo se der erro no upload)
-        // Evita acumular arquivos na pasta "upload/"
-       await fs.unlink(file.path).catch(() => {});
+        await fs.unlink(file.path).catch(() => {});
       }
     }
 
-    // Retorna todos os uploads realizados
-    return results
+    return results;
   }
 
   /**
-   * Método principal para criar um post
+   * Cria um post com múltiplas mídias
    */
-  async execute({ title, category, content, files, userId }: CreatedPostServiceProps & { userId: string }) {
+  async execute({ title, category, content, files, userId }: CreatedPostServiceProps) {
+    // 1. Upload das mídias (se existirem)
+    const uploaded = files ? await this.uploadFile(files) : [];
 
-  // 1. Faz upload (ou retorna array vazio)
-  const uploaded = files ? await this.uploadFile(files) : [];
+    // 2. Formata para o Prisma
+    const mediaData = uploaded.map((item) => ({
+      url: item.url,
+      type: item.type,
+      public_id: item.public_id, // 👈 agora correto
+    }));
 
-  // 2. Converte pro formato que o Prisma espera
-  const mediaData = uploaded.map(item => ({
-    url: item.url,
-    type: item.type,
-    // opcional (se você adicionar no schema depois)
-    // publicId: item.publicId
-  }));
+    // 3. Cria o post + mídias
+    const post = await prisma.post.create({
+      data: {
+        title,
+        category,
+        content,
+        userId,
 
-  // 3. Cria o post já com as mídias vinculadas
-  const post = await prisma.post.create({
-    data: {
-      title,
-      category,
-      content,
-      userId, 
+        media: {
+          create: mediaData,
+        },
+      },
+      include: {
+        media: true, // 👈 já retorna as mídias junto
+      },
+    });
 
-      media: {
-        create: mediaData
-      }
-    }
-  });
-
-  return post;
-}
+    return post;
+  }
 }
