@@ -26,6 +26,7 @@ export class ForgotPasswordService {
       .digest("hex");
 
     const expireAt = new Date(Date.now() + 1000 * 60 * 15);
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
 
     await prisma.passwordReset.updateMany({
       where: {
@@ -52,7 +53,7 @@ export class ForgotPasswordService {
         <h2>Ola, ${user.name}</h2>
         <p>Voce solicitou a redefinicao de senha.</p>
         <p>Use o link abaixo para continuar:</p>
-        <a href="http://localhost:3000/reset?token=${resetToken}">
+        <a href="${frontendUrl}/reset?token=${resetToken}">
           Redefinir senha
         </a>
         <p>Esse link expira em 15 minutos.</p>

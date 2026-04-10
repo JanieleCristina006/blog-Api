@@ -16,11 +16,11 @@ type ValidatedRequestData = {
 export const validateSchema = (schema: RequestSchema) =>
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const validatedData = await schema.parseAsync({
+      const validatedData = (await schema.parseAsync({
         body: req.body,
         query: req.query,
         params: req.params,
-      }) as ValidatedRequestData;
+      })) as ValidatedRequestData;
 
       if (validatedData.body !== undefined) {
         req.body = validatedData.body;
@@ -38,7 +38,7 @@ export const validateSchema = (schema: RequestSchema) =>
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json({
-          error: "Erro de validação",
+          error: "Erro de validacao",
           details: error.issues.map((issue) => ({
             campo: issue.path.join("."),
             mensagem: issue.message,

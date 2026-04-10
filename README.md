@@ -9,6 +9,7 @@ Backend de blog construido com Node.js, TypeScript, Express e Prisma, com autent
 - login com JWT
 - recuperacao de senha por email
 - redefinicao de senha por token
+- CRUD de categorias
 - criacao, listagem, atualizacao e remocao de posts
 - rotas administrativas de post protegidas por autenticacao e permissao de `admin`
 - upload de imagens e videos para o Cloudinary
@@ -39,6 +40,7 @@ api-blog/
 |-- src/
 |   |-- config/
 |   |-- controllers/
+|   |   |-- category/
 |   |   |-- post/
 |   |   `-- user/
 |   |-- database/
@@ -46,6 +48,7 @@ api-blog/
 |   |-- middlewares/
 |   |-- routes/
 |   |-- services/
+|   |   |-- category/
 |   |   |-- post/
 |   |   `-- user/
 |   |-- shema/
@@ -113,6 +116,7 @@ O schema Prisma atual possui os models:
 - `User`
 - `PasswordReset`
 - `Post`
+- `Category`
 - `Media`
 - `Comment`
 - `Like`
@@ -120,7 +124,8 @@ O schema Prisma atual possui os models:
 Relacoes principais:
 
 - um usuario possui posts, comentarios, likes e tokens de recuperacao
-- um post pertence a um usuario e pode ter midias, comentarios e likes
+- um post pertence a um usuario, pode se relacionar com uma categoria e pode ter midias, comentarios e likes
+- uma categoria pode estar vinculada a varios posts
 - `Like` impede duplicidade por usuario e post com `@@unique([userId, postId])`
 - `PasswordReset` armazena apenas o hash do token, prazo de expiracao e uso
 
@@ -293,7 +298,7 @@ Campos:
 
 - `title`
 - `content`
-- `category` (opcional)
+- `categoryId` (opcional)
 - `files` (0 ou mais arquivos)
 
 Comportamento:
@@ -301,6 +306,7 @@ Comportamento:
 - valida o token JWT
 - busca o usuario no banco
 - bloqueia usuarios que nao sejam `admin`
+- valida a categoria informada quando `categoryId` for enviado
 - envia imagens e videos para o Cloudinary
 - remove arquivos temporarios locais mesmo em caso de falha
 - cria o post e as entradas de midia relacionadas no banco
@@ -312,7 +318,7 @@ curl -X POST http://localhost:3000/createdpost \
   -H "Authorization: Bearer SEU_TOKEN" \
   -F "title=Meu primeiro post" \
   -F "content=Conteudo do post" \
-  -F "category=tecnologia" \
+  -F "categoryId=UUID_DA_CATEGORIA" \
   -F "files=@imagem.png" \
   -F "files=@video.mp4"
 ```
@@ -324,7 +330,10 @@ Resposta de sucesso:
   "id": "uuid",
   "title": "Meu primeiro post",
   "content": "Conteudo do post",
-  "category": "tecnologia",
+  "category": {
+    "id": "uuid",
+    "name": "tecnologia"
+  },
   "createdAt": "2026-03-26T12:00:00.000Z",
   "userId": "uuid"
 }
@@ -364,13 +373,14 @@ Campos aceitos:
 
 - `title` (opcional)
 - `content` (opcional)
-- `category` (opcional)
+- `categoryId` (opcional)
 - `files` (0 ou mais arquivos opcionais)
 
 Comportamento:
 
 - localiza o post pelo `postId`
 - atualiza apenas os campos enviados
+- valida a categoria quando `categoryId` for enviado
 - se novos arquivos forem enviados, remove as midias antigas do Cloudinary
 - apaga os registros antigos de midia no banco
 - faz upload das novas midias e as vincula ao post
@@ -382,6 +392,7 @@ curl -X PATCH http://localhost:3000/posts/POST_ID \
   -H "Authorization: Bearer SEU_TOKEN" \
   -F "title=Titulo atualizado" \
   -F "content=Conteudo atualizado" \
+  -F "categoryId=UUID_DA_CATEGORIA" \
   -F "files=@nova-imagem.png"
 ```
 
@@ -419,6 +430,84 @@ Resposta de sucesso:
 }
 ```
 
+### `POST /categories`
+
+Cria uma nova categoria.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+
+Body JSON:
+
+```json
+{
+  "name": "Tecnologia"
+}
+```
+
+Validacao:
+
+- `name`: minimo de 2 caracteres
+
+### `GET /categories`
+
+Lista as categorias cadastradas.
+
+Retorna:
+
+- `id`
+- `name`
+- `createdAt`
+- `_count.posts`
+
+Exemplo:
+
+```bash
+curl http://localhost:3000/categories
+```
+
+### `PATCH /categories/:categoryId`
+
+Atualiza o nome de uma categoria.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+
+Body JSON:
+
+```json
+{
+  "name": "Programacao"
+}
+```
+
+Validacao:
+
+- `categoryId`: UUID valido
+- `name`: minimo de 2 caracteres
+
+### `DELETE /categories/:categoryId`
+
+Remove uma categoria existente.
+
+Requisitos:
+
+- header `Authorization: Bearer <token>`
+- o usuario autenticado precisa ter `role === "admin"`
+
+Validacao:
+
+- `categoryId`: UUID valido
+
+Comportamento:
+
+- remove a categoria
+- posts vinculados permanecem no banco e ficam com `categoryId` nulo
+
 ## Validacao
 
 As rotas que usam schema passam pelo middleware `validateSchema` com Zod.
@@ -438,6 +527,13 @@ Regras atuais:
 - `reset-password`
 - `newPassword`: minimo de 6 caracteres
 - `token` nos parametros: obrigatorio
+- `create category`
+- `name`: minimo de 2 caracteres
+- `update category`
+- `categoryId` nos parametros: UUID obrigatorio
+- `name`: minimo de 2 caracteres
+- `delete category`
+- `categoryId` nos parametros: UUID obrigatorio
 - `delete post`
 - `postId` nos parametros: UUID obrigatorio
 
@@ -483,6 +579,7 @@ Ja existe:
 
 - autenticacao com JWT
 - recuperacao e redefinicao de senha
+- CRUD de categorias
 - middleware de autorizacao para rotas administrativas de posts
 - criacao, listagem, atualizacao e exclusao de posts
 - upload de midia para posts

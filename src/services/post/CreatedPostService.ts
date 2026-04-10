@@ -1,11 +1,12 @@
-import { prisma } from "../../database/db.js";
-import cloudinary from "../../config/cloudinary.js";
 import fs from "node:fs/promises";
+import cloudinary from "../../config/cloudinary.js";
+import { prisma } from "../../database/db.js";
+import { AppError } from "../../utils/AppError.js";
 
 interface CreatedPostServiceProps {
   title: string;
   content: string;
-  category?: string;
+  categoryId?: string;
   files?: Express.Multer.File[];
   userId: string;
 }
@@ -13,10 +14,6 @@ interface CreatedPostServiceProps {
 type MulterFile = Express.Multer.File;
 
 export class CreatedPostService {
-  /**
-   * Faz upload dos arquivos para o Cloudinary
-   * e remove os arquivos locais após o upload
-   */
   async uploadFile(files: MulterFile[], folder = "uploads") {
     const results = [];
 
@@ -33,7 +30,7 @@ export class CreatedPostService {
 
         results.push({
           url: result.secure_url,
-          public_id: result.public_id, // 👈 importante pro delete depois
+          public_id: result.public_id,
           type: result.resource_type,
         });
       } finally {
@@ -44,34 +41,44 @@ export class CreatedPostService {
     return results;
   }
 
-  /**
-   * Cria um post com múltiplas mídias
-   */
-  async execute({ title, category, content, files, userId }: CreatedPostServiceProps) {
-    // 1. Upload das mídias (se existirem)
+  async execute({
+    title,
+    categoryId,
+    content,
+    files,
+    userId,
+  }: CreatedPostServiceProps) {
     const uploaded = files ? await this.uploadFile(files) : [];
 
-    // 2. Formata para o Prisma
     const mediaData = uploaded.map((item) => ({
       url: item.url,
       type: item.type,
-      public_id: item.public_id, // 👈 agora correto
+      public_id: item.public_id,
     }));
 
-    // 3. Cria o post + mídias
+    if (categoryId) {
+      const categoryExists = await prisma.category.findUnique({
+        where: { id: categoryId },
+      });
+
+      if (!categoryExists) {
+        throw new AppError("Categoria nao encontrada", 404);
+      }
+    }
+
     const post = await prisma.post.create({
       data: {
-        title,
-        category,
-        content,
+        title: title.trim(),
+        content: content.trim(),
         userId,
-
+        ...(categoryId ? { categoryId } : {}),
         media: {
           create: mediaData,
         },
       },
       include: {
-        media: true, // 👈 já retorna as mídias junto
+        media: true,
+        category: true,
       },
     });
 

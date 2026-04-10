@@ -7,7 +7,7 @@ interface TokenPayload {
   sub: string;
 }
 
-export async function authPostMiddleware(
+export async function authUserMiddleware(
   req: Request,
   res: Response,
   next: NextFunction
@@ -34,10 +34,6 @@ export async function authPostMiddleware(
 
     if (!user) {
       return next(new AppError("Usuário não encontrado", 401));
-    }
-
-    if (user.role !== "admin") {
-      return next(new AppError("Apenas administradores podem acessar esta rota", 403));
     }
 
     req.user_id = userId;

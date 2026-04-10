@@ -1,5 +1,6 @@
 import cloudinary from "../../config/cloudinary.js";
 import { prisma } from "../../database/db.js";
+import { AppError } from "../../utils/AppError.js";
 
 interface DeletePostServiceProps {
   postId: string;
@@ -13,7 +14,7 @@ export class DeletePostService {
     });
 
     if (!post) {
-      throw new Error("Post não encontrado");
+      throw new AppError("Post nao encontrado", 404);
     }
 
     for (const media of post.media) {
